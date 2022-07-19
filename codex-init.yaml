@@ -1,0 +1,197 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: codex-init-configmap
+data:
+  init_db_with_user.sh: |
+    #!/bin/bash
+    set -e
+
+    # $DB_ADMIN_CONN_STR - globally defined
+    # $1 - database name of the database to create
+    # $2 - username of the database to create
+    # $3 - password of the database to create
+    
+    psql -v ON_ERROR_STOP=1 "$DB_ADMIN_CONN_STR" <<-EOSQL
+        CREATE USER ${2} WITH PASSWORD '${3}';
+        CREATE DATABASE ${1};
+        GRANT ALL PRIVILEGES ON DATABASE ${1} TO ${2};
+        GRANT ${2} TO CURRENT_USER;
+    EOSQL
+    # The `GRANT <role> to CURRENT_USER` statement allows the reassignment
+    # of tables (and other database objects) to the application user.
+    # This is primarily used when a database is imported from an existing
+    # application. Essentially it allows the administrative user,
+    # a member of the target role, to give ownership to the target role.
+    # Without this role membership, the admin would be trying
+    # to give away the table, which isn't allowed.
+    # This likely brings up the question of why the application user needs
+    # to own the tables. Only the owner of the table can modify the table,
+    # which is necessary for application migrations.
+    # See also, https://stackoverflow.com/questions/30968350/error-must-be-member-of-role-postgresql/30968780#comment49972236_30968780
+
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: init-edm-db
+  labels:
+    app: edm
+    operation: init
+spec:
+  template:
+    metadata:
+      labels:
+        app: edm
+        operation: init
+    spec:
+      containers:
+        - name: edm-db-creds-init
+          image: postgres:13
+          command:
+            - /init_db_with_user.sh
+            - $(DB_NAME)
+            - $(DB_USER)
+            - $(DB_PASSWORD)
+          env:
+            - name: DB_NAME
+              valueFrom:
+                configMapKeyRef:
+                  name: codex-configmap
+                  key: edm_db_name
+            - name: DB_USER
+              valueFrom:
+                configMapKeyRef:
+                  name: codex-configmap
+                  key: edm_db_username
+            - name: DB_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: codex-secret
+                  key: edm_db_password
+            - name: DB_ADMIN_CONN_STR
+              valueFrom:
+                secretKeyRef:
+                  name: codex-secret
+                  key: db_admin_conn_str
+          volumeMounts:
+            - name: init-script
+              mountPath: /init_db_with_user.sh
+              subPath: init_db_with_user.sh
+      volumes:
+        - name: init-script
+          configMap:
+            name: codex-init-configmap
+            defaultMode: 0777
+      restartPolicy: Never
+  backoffLimit: 1
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: init-codex-houston-db
+  labels:
+    app: codex-houston
+    operation: init
+spec:
+  template:
+    metadata:
+      labels:
+        app: codex-houston
+        operation: init
+    spec:
+      containers:
+        - name: codex-houston-db-creds-init
+          image: postgres:13
+          command:
+            - /init_db_with_user.sh
+            - $(DB_NAME)
+            - $(DB_USER)
+            - $(DB_PASSWORD)
+          env:
+            - name: DB_NAME
+              valueFrom:
+                configMapKeyRef:
+                  name: codex-configmap
+                  key: houston_db_name
+            - name: DB_USER
+              valueFrom:
+                configMapKeyRef:
+                  name: codex-configmap
+                  key: houston_db_username
+            - name: DB_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: codex-secret
+                  key: houston_db_password
+            - name: DB_ADMIN_CONN_STR
+              valueFrom:
+                secretKeyRef:
+                  name: codex-secret
+                  key: db_admin_conn_str
+          volumeMounts:
+            - name: init-script
+              mountPath: /init_db_with_user.sh
+              subPath: init_db_with_user.sh
+      volumes:
+        - name: init-script
+          configMap:
+            name: codex-init-configmap
+            defaultMode: 0777
+      restartPolicy: Never
+  backoffLimit: 1
+# ---
+# apiVersion: batch/v1
+# kind: Job
+# metadata:
+#   name: init-acm-db
+#   labels:
+#     app: acm
+#     operation: init
+# spec:
+#   template:
+#     metadata:
+#       labels:
+#         app: acm
+#         operation: init
+#     spec:
+#       containers:
+#         - name: acm-db-creds-init
+#           image: postgres:13
+#           command:
+#             - /init_db_with_user.sh
+#             - $(DB_NAME)
+#             - $(DB_USER)
+#             - $(DB_PASSWORD)
+#           env:
+#             - name: DB_NAME
+#               valueFrom:
+#                 configMapKeyRef:
+#                   name: acm-configmap
+#                   key: db_name
+#             - name: DB_USER
+#               valueFrom:
+#                 configMapKeyRef:
+#                   name: acm-configmap
+#                   key: db_user
+#             - name: DB_PASSWORD
+#               valueFrom:
+#                 secretKeyRef:
+#                   name: acm-secret
+#                   key: db_password
+#             - name: DB_ADMIN_CONN_STR
+#               valueFrom:
+#                 secretKeyRef:
+#                   name: codex-secret
+#                   key: db_admin_conn_str
+#           volumeMounts:
+#             - name: init-script
+#               mountPath: /init_db_with_user.sh
+#               subPath: init_db_with_user.sh
+#       volumes:
+#         - name: init-script
+#           configMap:
+#             name: codex-init-configmap
+#             defaultMode: 0777
+#       restartPolicy: Never
+#   backoffLimit: 1

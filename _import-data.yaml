@@ -1,0 +1,315 @@
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: codex-import-data-pvc
+spec:
+  accessModes:
+    - ReadWriteOnce
+  storageClassName: managed-csi
+  resources:
+    requests:
+      storage: 500Gi
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: codex-import-scripts-configmap
+data:
+  load.sh: |
+    #!/bin/bash
+    set -ex
+
+    # $DB_ADMIN_CONN_STR - globally defined
+    # $1 - database name of the database to load data into
+    # $2 - username of the database to create
+    # $3 - password of the database to create
+    # $4 - sql file to load
+
+    psql -v ON_ERROR_STOP=1 "$DB_ADMIN_CONN_STR" -c "DROP DATABASE ${1};"
+    psql -v ON_ERROR_STOP=1 "$DB_ADMIN_CONN_STR" <<-EOSQL
+        DO
+        \$do\$
+        BEGIN
+           IF NOT EXISTS ( SELECT FROM pg_catalog.pg_roles WHERE rolname = '${2}' ) THEN
+              CREATE USER ${2} WITH PASSWORD '${3}';
+           END IF;
+        END
+        \$do\$;
+
+        CREATE DATABASE ${1};
+        GRANT ALL PRIVILEGES ON DATABASE ${1} TO ${2};
+    EOSQL
+
+    # $DB_ADMIN_CONN_STR - globally defined
+    # $1 - database name of the database to load data into
+    # $4 - database name of the database 
+
+    db_conn_str=${DB_ADMIN_CONN_STR/"/postgres?"/"/${1}?"}
+    gunzip -c ${4} | psql "${db_conn_str}"
+
+    psql -v ON_ERROR_STOP=1 "${db_conn_str}" -c "GRANT ALL PRIVILEGES ON ALL TABLES IN SCHEMA public TO ${2};"
+    # Reassign ownership of the tables to the application user (i.e. $2)
+    psql -v ON_ERROR_STOP=1 "${db_conn_str}" -c "REASSIGN OWNED BY CURRENT_USER TO ${2}"
+  load-assets.sh: |
+    #!/usr/bin/bash
+    set -exp
+
+    # $1 - remote host machine
+    # $2 - filepath to the migration assets tsv
+    # $3 - remote path to wildbook data directory
+    # $4 - local location to sync
+    # $5 - ssh key file location
+    # $6 - ssh login name
+
+    # Install rsync
+    apt update
+    apt install rsync openssh-client -y
+    # Initialize ssh
+    mkdir -p ~/.ssh && ssh-keyscan $1 >> ~/.ssh/known_hosts
+
+    # Assign sync and destination directories
+    sync_dir=$4/asset_sync
+    dest_dir=/data/var/asset_group
+    mkdir -p $sync_dir
+    mkdir -p $dest_dir
+
+    # Sync the data to the local machine
+    # ... the file list comes form the wildbook migration procedure
+    # Note, first line of the tsv is a header line starting with '#'
+    grep -v '^#' $2 | cut -f1 > /filelist
+    rsync \
+      -av \
+      -e "ssh -i $5 -l $6" \
+      --files-from=/filelist \
+      $1:$3 $sync_dir
+
+    # Reorganize the data for houston usage
+    # ... this script comes from the wildbook migration procedure
+    perl /gen-migration-script.pl < $2 > /assets_dirs_and_copy.sh
+    bash /assets_dirs_and_copy.sh $dest_dir $sync_dir
+  gen-migration-script.pl: |
+    #!/usr/bin/perl
+    print "TARGET_DIR=\$1\nSOURCE_ROOT=\$2\n\n";
+    my @all_lines = <>;
+    my $ct = $#all_lines;
+    foreach (@all_lines) {
+        next if (/^#/);
+        chop;
+        ($source_file, $target_dir, $upload_filename, $asset_filename) = split(/\t/, $_);
+        die "upload_filename: $upload_filename" if ($upload_filename =~ /"/);
+        print "echo $ct\n" if ($ct % 100 == 0);
+        printf("mkdir -p \$TARGET_DIR/%s/_uploads/\n", $target_dir);
+        printf("mkdir -p \$TARGET_DIR/%s/_assets/\n", $target_dir);
+        printf("cp \"\$SOURCE_ROOT/%s\" \$TARGET_DIR/%s/_uploads/%s\n", $source_file, $target_dir, $upload_filename);
+        printf("ln -s ../_uploads/%s \$TARGET_DIR/%s/_assets/%s\n\n", $upload_filename, $target_dir, $asset_filename);
+        $ct--;
+    }
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: import-edm-data
+  labels:
+    app: import
+spec:
+  template:
+    metadata:
+      labels:
+        app: import
+    spec:
+      containers:
+        - name: import-edm-data
+          image: postgres:13
+          command:
+            - /load.sh
+            - $(DB_NAME)
+            - $(DB_USER)
+            - $(DB_PASSWORD)
+            - /mnt/import-data/edm.sql.gz
+          env:
+            - name: DB_NAME
+              valueFrom:
+                configMapKeyRef:
+                  name: codex-configmap
+                  key: edm_db_name
+            - name: DB_USER
+              valueFrom:
+                configMapKeyRef:
+                  name: codex-configmap
+                  key: edm_db_username
+            - name: DB_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: codex-secret
+                  key: edm_db_password
+            - name: DB_ADMIN_CONN_STR
+              valueFrom:
+                secretKeyRef:
+                  name: codex-secret
+                  key: db_admin_conn_str
+          volumeMounts:
+            - name: scripts
+              mountPath: /load.sh
+              subPath: load.sh
+            - name: import-data
+              mountPath: /mnt/import-data
+      volumes:
+        - name: scripts
+          configMap:
+            name: codex-import-scripts-configmap
+            defaultMode: 0777
+        - name: import-data
+          csi:
+            driver: file.csi.azure.com
+            volumeAttributes:
+              secretName: import-data-azure-files-secret
+              shareName: import-data
+              mountOptions: "dir_mode=0777,file_mode=0777,cache=strict,actimeo=30"
+      restartPolicy: Never
+  backoffLimit: 0
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: import-houston-data
+  labels:
+    app: import
+spec:
+  template:
+    metadata:
+      labels:
+        app: import
+    spec:
+      containers:
+        - name: import-houston-data
+          image: postgres:13
+          command:
+            - /load.sh
+            - $(DB_NAME)
+            - $(DB_USER)
+            - $(DB_PASSWORD)
+            - /mnt/import-data/houston.sql.gz
+          env:
+            - name: DB_NAME
+              valueFrom:
+                configMapKeyRef:
+                  name: codex-configmap
+                  key: houston_db_name
+            - name: DB_USER
+              valueFrom:
+                configMapKeyRef:
+                  name: codex-configmap
+                  key: houston_db_username
+            - name: DB_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: codex-secret
+                  key: houston_db_password
+            - name: DB_ADMIN_CONN_STR
+              valueFrom:
+                secretKeyRef:
+                  name: codex-secret
+                  key: db_admin_conn_str
+          volumeMounts:
+            - name: scripts
+              mountPath: /load.sh
+              subPath: load.sh
+            - name: import-data
+              mountPath: /mnt/import-data
+      volumes:
+        - name: scripts
+          configMap:
+            name: codex-import-scripts-configmap
+            defaultMode: 0777
+        - name: import-data
+          csi:
+            driver: file.csi.azure.com
+            volumeAttributes:
+              secretName: import-data-azure-files-secret
+              shareName: import-data
+              mountOptions: "dir_mode=0777,file_mode=0777,cache=strict,actimeo=30"
+      restartPolicy: Never
+  backoffLimit: 0
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: import-houston-asset-data
+  labels:
+    app: import
+spec:
+  template:
+    metadata:
+      labels:
+        app: import
+    spec:
+      containers:
+        - name: task
+          image: ubuntu
+          imagePullPolicy: "Always"
+          ports:
+            - containerPort: 5000
+          command:
+            - /load-assets.sh
+            - $(REMOTE_HOST)
+            - /mnt/import-data/assets.tsv
+            - $(REMOTE_PATH)
+            - /mnt/workspace/import
+            - /remote_ssh_key
+            - $(REMOTE_LOGIN)
+          env:
+            - name: REMOTE_HOST
+              valueFrom:
+                secretKeyRef:
+                  name: codex-import-remote-secret
+                  key: host
+            - name: REMOTE_PATH
+              valueFrom:
+                secretKeyRef:
+                  name: codex-import-remote-secret
+                  key: path
+            - name: REMOTE_LOGIN
+              valueFrom:
+                secretKeyRef:
+                  name: codex-import-remote-secret
+                  key: user
+          volumeMounts:
+            - name: scripts
+              mountPath: /load-assets.sh
+              subPath: load-assets.sh
+            - name: scripts
+              mountPath: /gen-migration-script.pl
+              subPath: gen-migration-script.pl
+            - name: import-data
+              mountPath: /mnt/import-data
+            - name: data-root
+              mountPath: /data/var
+            - name: workspace
+              mountPath: /mnt/workspace
+            - name: remote-info
+              mountPath: /remote_ssh_key
+              subPath: ssh_key
+      volumes:
+        - name: scripts
+          configMap:
+            name: codex-import-scripts-configmap
+            defaultMode: 0777
+        - name: remote-info
+          secret:
+            secretName: codex-import-remote-secret
+            defaultMode: 0600
+        - name: import-data
+          csi:
+            driver: file.csi.azure.com
+            volumeAttributes:
+              secretName: import-data-azure-files-secret
+              shareName: import-data
+              mountOptions: "dir_mode=0777,file_mode=0777,cache=strict,actimeo=30"
+        - name: data-root
+          persistentVolumeClaim:
+            claimName: houston-data-pvc
+        - name: workspace
+          persistentVolumeClaim:
+            claimName: codex-import-data-pvc
+      restartPolicy: Never
+  backoffLimit: 0

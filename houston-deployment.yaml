@@ -1,0 +1,632 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: houston-api
+  labels:
+    app: houston
+    proc: api
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: houston
+      proc: api
+  template:
+    metadata:
+      labels:
+        app: houston
+        proc: api
+    spec:
+      containers:
+        - name: houston
+          # TODO: get a solidly tagged image
+          # FIXME: use wildme/houston
+          image: wildme/houston:latest
+          imagePullPolicy: "Always"
+          ports:
+            - containerPort: 5000
+          command: ["invoke"]
+          args:
+            - app.run
+            - --host
+            - $(POD_IP)
+          env:
+            # Used to bind the service to the pod's IP address
+            - name: POD_IP
+              valueFrom:
+                fieldRef:
+                  fieldPath: status.podIP
+            - name: HOUSTON_APP_CONTEXT
+              value: "codex"
+            - name: FLASK_ENV
+              value: "production"
+            - name: SECRET_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: codex-secret
+                  key: houston_secret_key
+            - name: DATABASE_FQDN
+              valueFrom:
+                configMapKeyRef:
+                  name: codex-configmap
+                  key: db_fqdn
+            - name: DATABASE_USERNAME
+              valueFrom:
+                configMapKeyRef:
+                  name: codex-configmap
+                  key: houston_db_username
+            - name: DATABASE_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: codex-secret
+                  key: houston_db_password
+            - name: DATABASE_NAME
+              valueFrom:
+                configMapKeyRef:
+                  name: codex-configmap
+                  key: houston_db_name
+            # FIXME: Possible to reference a kubernetes service that points to the postgres service?
+            - name: SQLALCHEMY_DATABASE_URI
+              value: "postgres://$(DATABASE_USERNAME):$(DATABASE_PASSWORD)@$(DATABASE_FQDN):5432/$(DATABASE_NAME)"
+            - name: EDM_AUTHENTICATIONS_URI__DEFAULT
+              value: "http://edm:8080/"
+            - name: EDM_AUTHENTICATIONS_USERNAME__DEFAULT
+              valueFrom:
+                secretKeyRef:
+                  name: codex-secret
+                  key: edm_admin_email
+            - name: EDM_AUTHENTICATIONS_PASSWORD__DEFAULT
+              valueFrom:
+                secretKeyRef:
+                  name: codex-secret
+                  key: edm_admin_password
+            - name: SAGE_AUTHENTICATIONS_URI__DEFAULT
+              valueFrom:
+                configMapKeyRef:
+                  name: codex-configmap
+                  key: acm_url
+            - name: SAGE_AUTHENTICATIONS_URI__SYNC
+              valueFrom:
+                configMapKeyRef:
+                  name: codex-configmap
+                  key: acm_url
+            - name: ELASTICSEARCH_HOSTS
+              value: "elasticsearch-master:9200"
+            - name: PREFERRED_URL_SCHEME
+              value: "https"
+            - name: SERVER_NAME
+              valueFrom:
+                configMapKeyRef:
+                  name: codex-configmap
+                  key: serving_domain
+            - name: HOSTON_REVERSE_PROXY_SETUP
+              value: "true"
+            # TODO: DEX-695
+            - name: HOUSTON_URL
+              value: "$(PREFERRED_URL_SCHEME)://$(SERVER_NAME)/"
+            - name: REDIS_HOST
+              valueFrom:
+                secretKeyRef:
+                  name: redis-connection-secret
+                  key: fqdn
+            - name: REDIS_PORT
+              #: The default redis_port is 6379, but for SSL it's 6380
+              value: "6380"
+            - name: REDIS_USE_SSL
+              #: Ensure we connect to redis using SSL
+              value: "1"
+            - name: REDIS_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: redis-connection-secret
+                  key: password
+            - name: GITLAB_PROTO
+              value: "https"
+            - name: GITLAB_HOST
+              valueFrom:
+                configMapKeyRef:
+                  name: codex-configmap
+                  key: gitlab_fqdn
+            - name: GITLAB_PORT
+              value: "443"
+            - name: GITLAB_REMOTE_URI
+              value: "$(GITLAB_PROTO)://$(GITLAB_HOST):$(GITLAB_PORT)"
+            - name: GITLAB_REMOTE_LOGIN_PAT
+              valueFrom:
+                secretKeyRef:
+                  name: codex-secret
+                  key: gitlab_pat
+            - name: GIT_PUBLIC_NAME
+              value: "Houston"
+            - name: GIT_EMAIL
+              valueFrom:
+                configMapKeyRef:
+                  name: codex-configmap
+                  key: gitlab_email
+            - name: GITLAB_NAMESPACE
+              valueFrom:
+                configMapKeyRef:
+                  name: codex-configmap
+                  key: gitlab_namespace
+            - name: OAUTH_CLIENT_ID
+              valueFrom:
+                secretKeyRef:
+                  name: houston-oauth-secret
+                  key: id
+            - name: OAUTH_CLIENT_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: houston-oauth-secret
+                  key: secret
+            - name: OAUTH_USER_EMAIL
+              value: "oauth-user@wildme.org"
+            - name: GIT_SSH_KEY_FILEPATH
+              # Assumes the gitlab-ssh-keypair secret filename is `key`
+              value: "/etc/ssh-key/key"
+            - name: WILDBOOK_DB_HOST
+              valueFrom:
+                configMapKeyRef:
+                  name: codex-configmap
+                  key: db_fqdn
+            - name: WILDBOOK_DB_NAME
+              valueFrom:
+                configMapKeyRef:
+                  name: codex-configmap
+                  key: edm_db_name
+            - name: WILDBOOK_DB_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: codex-secret
+                  key: edm_db_password
+            - name: WILDBOOK_DB_USER
+              valueFrom:
+                configMapKeyRef:
+                  name: codex-configmap
+                  key: edm_db_username
+            # FIXME Included because the mailer is not configured for subdomains. Once this has been resolved this assignment can be removed.
+            - name: MAIL_DEFAULT_SENDER_EMAIL
+              value: "do-not-reply@wildme.org"
+            # /FIXME
+            # FIXME To be changed in https://github.com/WildMeOrg/houston/pull/739
+            - name: SENTRY_DSN_PRODUCTION
+              valueFrom:
+                configMapKeyRef:
+                  name: codex-configmap
+                  key: sentry_dsn
+            # /FIXME
+          volumeMounts:
+            - name: gitlab-ssh-key-volume
+              mountPath: "/etc/ssh-key"
+            - name: data-root
+              mountPath: /data/var
+      volumes:
+        - name: gitlab-ssh-key-volume
+          secret:
+            secretName: gitlab-ssh-keypair
+            defaultMode: 256
+        - name: data-root
+          persistentVolumeClaim:
+            claimName: houston-data-pvc
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: houston-api
+spec:
+  selector:
+    app: houston
+    proc: api
+  ports:
+    - protocol: TCP
+      port: 5000
+      targetPort: 5000
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: houston-beat
+  labels:
+    app: houston
+    proc: beat
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: houston
+      proc: beat
+  template:
+    metadata:
+      labels:
+        app: houston
+        proc: beat
+    spec:
+      containers:
+        - name: houston
+          # TODO: get a solidly tagged image
+          image: wildme/houston:latest
+          imagePullPolicy: "Always"
+          ports:
+            - containerPort: 5000
+          command: ["celery"]
+          args:
+            - -A
+            - app.extensions.celery.celery
+            - beat
+            - -s
+            - /data/var/celerybeat-schedule
+            # - -l
+            # - DEBUG
+          env:
+            # Used to bind the service to the pod's IP address
+            - name: POD_IP
+              valueFrom:
+                fieldRef:
+                  fieldPath: status.podIP
+            - name: HOUSTON_APP_CONTEXT
+              value: "codex"
+            - name: FLASK_ENV
+              value: "production"
+            - name: SECRET_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: codex-secret
+                  key: houston_secret_key
+            - name: DATABASE_FQDN
+              valueFrom:
+                configMapKeyRef:
+                  name: codex-configmap
+                  key: db_fqdn
+            - name: DATABASE_USERNAME
+              valueFrom:
+                configMapKeyRef:
+                  name: codex-configmap
+                  key: houston_db_username
+            - name: DATABASE_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: codex-secret
+                  key: houston_db_password
+            - name: DATABASE_NAME
+              valueFrom:
+                configMapKeyRef:
+                  name: codex-configmap
+                  key: houston_db_name
+            # FIXME: Possible to reference a kubernetes service that points to the postgres service?
+            - name: SQLALCHEMY_DATABASE_URI
+              value: "postgres://$(DATABASE_USERNAME):$(DATABASE_PASSWORD)@$(DATABASE_FQDN):5432/$(DATABASE_NAME)"
+            - name: EDM_AUTHENTICATIONS_URI__DEFAULT
+              value: "http://edm:8080/"
+            - name: EDM_AUTHENTICATIONS_USERNAME__DEFAULT
+              valueFrom:
+                secretKeyRef:
+                  name: codex-secret
+                  key: edm_admin_email
+            - name: EDM_AUTHENTICATIONS_PASSWORD__DEFAULT
+              valueFrom:
+                secretKeyRef:
+                  name: codex-secret
+                  key: edm_admin_password
+            - name: SAGE_AUTHENTICATIONS_URI__DEFAULT
+              valueFrom:
+                configMapKeyRef:
+                  name: codex-configmap
+                  key: acm_url
+            - name: SAGE_AUTHENTICATIONS_URI__SYNC
+              valueFrom:
+                configMapKeyRef:
+                  name: codex-configmap
+                  key: acm_url
+            - name: ELASTICSEARCH_HOSTS
+              value: "elasticsearch-master:9200"
+            - name: PREFERRED_URL_SCHEME
+              value: "https"
+            - name: SERVER_NAME
+              valueFrom:
+                configMapKeyRef:
+                  name: codex-configmap
+                  key: serving_domain
+            # TODO: DEX-695
+            - name: HOUSTON_URL
+              value: "$(PREFERRED_URL_SCHEME)://$(SERVER_NAME)/"
+            - name: REDIS_HOST
+              valueFrom:
+                secretKeyRef:
+                  name: redis-connection-secret
+                  key: fqdn
+            - name: REDIS_PORT
+              #: The default redis_port is 6379, but for SSL it's 6380
+              value: "6380"
+            - name: REDIS_USE_SSL
+              #: Ensure we connect to redis using SSL
+              value: "1"
+            - name: REDIS_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: redis-connection-secret
+                  key: password
+            - name: GITLAB_PROTO
+              value: "https"
+            - name: GITLAB_HOST
+              valueFrom:
+                configMapKeyRef:
+                  name: codex-configmap
+                  key: gitlab_fqdn
+            - name: GITLAB_PORT
+              value: "443"
+            - name: GITLAB_REMOTE_URI
+              value: "$(GITLAB_PROTO)://$(GITLAB_HOST):$(GITLAB_PORT)"
+            - name: GITLAB_REMOTE_LOGIN_PAT
+              valueFrom:
+                secretKeyRef:
+                  name: codex-secret
+                  key: gitlab_pat
+            - name: GIT_PUBLIC_NAME
+              value: "Houston"
+            - name: GIT_EMAIL
+              valueFrom:
+                configMapKeyRef:
+                  name: codex-configmap
+                  key: gitlab_email
+            - name: GITLAB_NAMESPACE
+              valueFrom:
+                configMapKeyRef:
+                  name: codex-configmap
+                  key: gitlab_namespace
+            - name: OAUTH_CLIENT_ID
+              valueFrom:
+                secretKeyRef:
+                  name: houston-oauth-secret
+                  key: id
+            - name: OAUTH_CLIENT_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: houston-oauth-secret
+                  key: secret
+            - name: OAUTH_USER_EMAIL
+              value: "oauth-user@wildme.org"
+            - name: GIT_SSH_KEY_FILEPATH
+              # Assumes the gitlab-ssh-keypair secret filename is `key`
+              value: "/etc/ssh-key/key"
+            - name: WILDBOOK_DB_HOST
+              valueFrom:
+                configMapKeyRef:
+                  name: codex-configmap
+                  key: db_fqdn
+            - name: WILDBOOK_DB_NAME
+              valueFrom:
+                configMapKeyRef:
+                  name: codex-configmap
+                  key: edm_db_name
+            - name: WILDBOOK_DB_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: codex-secret
+                  key: edm_db_password
+            - name: WILDBOOK_DB_USER
+              valueFrom:
+                configMapKeyRef:
+                  name: codex-configmap
+                  key: edm_db_username
+            # FIXME Included because the mailer is not configured for subdomains. Once this has been resolved this assignment can be removed.
+            - name: MAIL_DEFAULT_SENDER_EMAIL
+              value: "do-not-reply@wildme.org"
+            # /FIXME
+            # FIXME To be changed in https://github.com/WildMeOrg/houston/pull/739
+            - name: SENTRY_DSN_PRODUCTION
+              valueFrom:
+                configMapKeyRef:
+                  name: codex-configmap
+                  key: sentry_dsn
+            # /FIXME
+          volumeMounts:
+            - name: gitlab-ssh-key-volume
+              mountPath: "/etc/ssh-key"
+      volumes:
+        - name: gitlab-ssh-key-volume
+          secret:
+            secretName: gitlab-ssh-keypair
+            defaultMode: 256
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: houston-worker
+  labels:
+    app: houston
+    proc: worker
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: houston
+      proc: worker
+  template:
+    metadata:
+      labels:
+        app: houston
+        proc: worker
+    spec:
+      containers:
+        - name: houston
+          # TODO: get a solidly tagged image
+          image: wildme/houston:latest
+          imagePullPolicy: "Always"
+          ports:
+            - containerPort: 5000
+          command: ["celery"]
+          args:
+            - -A
+            - app.extensions.celery.celery
+            - worker
+            # - -l
+            # - DEBUG
+          env:
+            # Used to bind the service to the pod's IP address
+            - name: POD_IP
+              valueFrom:
+                fieldRef:
+                  fieldPath: status.podIP
+            - name: HOUSTON_APP_CONTEXT
+              value: "codex"
+            - name: FLASK_ENV
+              value: "production"
+            - name: SECRET_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: codex-secret
+                  key: houston_secret_key
+            - name: DATABASE_FQDN
+              valueFrom:
+                configMapKeyRef:
+                  name: codex-configmap
+                  key: db_fqdn
+            - name: DATABASE_USERNAME
+              valueFrom:
+                configMapKeyRef:
+                  name: codex-configmap
+                  key: houston_db_username
+            - name: DATABASE_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: codex-secret
+                  key: houston_db_password
+            - name: DATABASE_NAME
+              valueFrom:
+                configMapKeyRef:
+                  name: codex-configmap
+                  key: houston_db_name
+            # FIXME: Possible to reference a kubernetes service that points to the postgres service?
+            - name: SQLALCHEMY_DATABASE_URI
+              value: "postgres://$(DATABASE_USERNAME):$(DATABASE_PASSWORD)@$(DATABASE_FQDN):5432/$(DATABASE_NAME)"
+            - name: EDM_AUTHENTICATIONS_URI__DEFAULT
+              value: "http://edm:8080/"
+            - name: EDM_AUTHENTICATIONS_USERNAME__DEFAULT
+              valueFrom:
+                secretKeyRef:
+                  name: codex-secret
+                  key: edm_admin_email
+            - name: EDM_AUTHENTICATIONS_PASSWORD__DEFAULT
+              valueFrom:
+                secretKeyRef:
+                  name: codex-secret
+                  key: edm_admin_password
+            - name: SAGE_AUTHENTICATIONS_URI__DEFAULT
+              valueFrom:
+                configMapKeyRef:
+                  name: codex-configmap
+                  key: acm_url
+            - name: SAGE_AUTHENTICATIONS_URI__SYNC
+              valueFrom:
+                configMapKeyRef:
+                  name: codex-configmap
+                  key: acm_url
+            - name: ELASTICSEARCH_HOSTS
+              value: "elasticsearch-master:9200"
+            - name: PREFERRED_URL_SCHEME
+              value: "https"
+            - name: SERVER_NAME
+              valueFrom:
+                configMapKeyRef:
+                  name: codex-configmap
+                  key: serving_domain
+            # TODO: DEX-695
+            - name: HOUSTON_URL
+              value: "$(PREFERRED_URL_SCHEME)://$(SERVER_NAME)/"
+            - name: REDIS_HOST
+              valueFrom:
+                secretKeyRef:
+                  name: redis-connection-secret
+                  key: fqdn
+            - name: REDIS_PORT
+              #: The default redis_port is 6379, but for SSL it's 6380
+              value: "6380"
+            - name: REDIS_USE_SSL
+              #: Ensure we connect to redis using SSL
+              value: "1"
+            - name: REDIS_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: redis-connection-secret
+                  key: password
+            - name: GITLAB_PROTO
+              value: "https"
+            - name: GITLAB_HOST
+              valueFrom:
+                configMapKeyRef:
+                  name: codex-configmap
+                  key: gitlab_fqdn
+            - name: GITLAB_PORT
+              value: "443"
+            - name: GITLAB_REMOTE_URI
+              value: "$(GITLAB_PROTO)://$(GITLAB_HOST):$(GITLAB_PORT)"
+            - name: GITLAB_REMOTE_LOGIN_PAT
+              valueFrom:
+                secretKeyRef:
+                  name: codex-secret
+                  key: gitlab_pat
+            - name: GIT_PUBLIC_NAME
+              value: "Houston"
+            - name: GIT_EMAIL
+              valueFrom:
+                configMapKeyRef:
+                  name: codex-configmap
+                  key: gitlab_email
+            - name: GITLAB_NAMESPACE
+              valueFrom:
+                configMapKeyRef:
+                  name: codex-configmap
+                  key: gitlab_namespace
+            - name: OAUTH_CLIENT_ID
+              valueFrom:
+                secretKeyRef:
+                  name: houston-oauth-secret
+                  key: id
+            - name: OAUTH_CLIENT_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: houston-oauth-secret
+                  key: secret
+            - name: OAUTH_USER_EMAIL
+              value: "oauth-user@wildme.org"
+            - name: GIT_SSH_KEY_FILEPATH
+              # Assumes the gitlab-ssh-keypair secret filename is `key`
+              value: "/etc/ssh-key/key"
+            - name: WILDBOOK_DB_HOST
+              valueFrom:
+                configMapKeyRef:
+                  name: codex-configmap
+                  key: db_fqdn
+            - name: WILDBOOK_DB_NAME
+              valueFrom:
+                configMapKeyRef:
+                  name: codex-configmap
+                  key: edm_db_name
+            - name: WILDBOOK_DB_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: codex-secret
+                  key: edm_db_password
+            - name: WILDBOOK_DB_USER
+              valueFrom:
+                configMapKeyRef:
+                  name: codex-configmap
+                  key: edm_db_username
+            # FIXME Included because the mailer is not configured for subdomains. Once this has been resolved this assignment can be removed.
+            - name: MAIL_DEFAULT_SENDER_EMAIL
+              value: "do-not-reply@wildme.org"
+            # /FIXME
+            # FIXME To be changed in https://github.com/WildMeOrg/houston/pull/739
+            - name: SENTRY_DSN_PRODUCTION
+              valueFrom:
+                configMapKeyRef:
+                  name: codex-configmap
+                  key: sentry_dsn
+            # /FIXME
+          volumeMounts:
+            - name: gitlab-ssh-key-volume
+              mountPath: "/etc/ssh-key"
+      volumes:
+        - name: gitlab-ssh-key-volume
+          secret:
+            secretName: gitlab-ssh-keypair
+            defaultMode: 256

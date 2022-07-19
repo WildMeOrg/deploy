@@ -1,0 +1,81 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: edm
+  labels:
+    app: edm
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: edm
+  template:
+    metadata:
+      labels:
+        app: edm
+    spec:
+      containers:
+        - name: edm
+          # TODO: get a solidly tagged image
+          image: wildme/edm:latest
+          imagePullPolicy: "Always"
+          ports:
+            - containerPort: 8080
+          env:
+            - name: DB_NAME
+              valueFrom:
+                configMapKeyRef:
+                  name: codex-configmap
+                  key: edm_db_name
+            - name: DB_USER
+              valueFrom:
+                configMapKeyRef:
+                  name: codex-configmap
+                  key: edm_db_username
+            - name: DB_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: codex-secret
+                  key: edm_db_password
+            - name: DB_FQDN
+              valueFrom:
+                configMapKeyRef:
+                  name: codex-configmap
+                  key: db_fqdn
+            - name: DB_CONNECTION_URL
+              value: jdbc:postgresql://$(DB_FQDN):5432/$(DB_NAME)
+            # Admin user created on startup,
+            # https://github.com/WildMeOrg/Wildbook/commit/6d65e70e43691f1b281bb76edf151e5c7cdb7403
+            - name: ADMIN_EMAIL
+              valueFrom:
+                secretKeyRef:
+                  name: codex-secret
+                  key: edm_admin_email
+            - name: ADMIN_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: codex-secret
+                  key: edm_admin_password
+            # FIXME: put this info into a ConfigMap
+            # JAVA_OPTS from old-world wildbook, which gives us 4G heap memory
+            - name: JAVA_OPTS
+              value: "-Djava.awt.headless=true -XX:+UseConcMarkSweepGC -Xms4096m -Xmx4096m"
+          volumeMounts:
+            - name: data-directory
+              mountPath: /data/wildbook_data_dir
+      volumes:
+        - name: data-directory
+          persistentVolumeClaim:
+            claimName: edm-data-pvc
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: edm
+spec:
+  selector:
+    app: edm
+  ports:
+    - protocol: TCP
+      port: 8080
+      targetPort: 8080
