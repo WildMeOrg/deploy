@@ -6,6 +6,10 @@ Ref: https://docs.microsoft.com/en-us/azure/aks/ingress-static-ip
 
 An [*Ingress*](https://kubernetes.io/docs/concepts/services-networking/ingress/) is used to provide external routes, via HTTP or HTTPS, to your cluster's services. An *Ingress Controller*, like [the NGINX Ingress Controller](https://kubernetes.github.io/ingress-nginx/deploy/#using-helm), fulfills the requirements presented by the Ingress using a load balancer.
 
+Note, the installation of nginx-ingress is done during the bootstrap process. This documentation can be useful for fully understanding the parts involved in the process.
+
+## Installation
+
 In this section, you will install the NGINX Ingress Controller using Helm, which will create a NodeBalancer to handle your cluster's traffic.
 
 1. Add the kubernetes Helm repository to your Helm repos:
@@ -48,16 +52,12 @@ In this section, you will install the NGINX Ingress Controller using Helm, which
 
 1. Copy the IP address. Navigate to your DNS manager and add/update an 'A' record with the cluster's external IP address. Ensure that the entry's **TTL** field is set to **5 to 30 minutes**.
 
-1. Set the domain in the configmap
-
-        source deploy_lib.sh
-        set_codex_setting 'serving_domain' 'codex.example.com'
+1. Set the domain in the configmap key 'serving_domain' to value 'codex.example.com'
 
 ### Using the azure created domain:
 
-1. Set the domain in the configmap
+1. Set the domain in the configmap key 'serving_domain' to the value of:
 
-        source deploy_lib.sh
-        set_codex_setting 'serving_domain' $(az network public-ip show --name $RG_NAME-public-ip --resource-group $(az aks show -g $RG_NAME -n $CLUSTER_NAME --query 'nodeResourceGroup' -o tsv) | jq -r '.dnsSettings.fqdn')
+        az network public-ip show --name $RG_NAME-public-ip --resource-group $(az aks show -g $RG_NAME -n $CLUSTER_NAME --query 'nodeResourceGroup' -o tsv) | jq -r '.dnsSettings.fqdn'
 
-1. Update the `dnsNames` value in `codex-certificate.yaml` with the same value.
+1. Update the `dnsNames` value in codex-certificate resource with the same value.

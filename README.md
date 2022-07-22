@@ -9,9 +9,9 @@ The notable services used:
 - [File storage (Azure File Storage)](https://docs.microsoft.com/en-us/azure/storage/files/storage-files-introduction) - used to persist and store application data
 
 
-## Prerequisite tasks
+## Supporting documentation
 
-1. [Install and usage of python-dotenv (optional)](docs/python-dotenv.md)
+1. [Install and usage of python-dotenv](docs/python-dotenv.md) (optional)
 1. [Azure Provisioning of AKS, Postgres and Redis services](docs/azure-provisioning.md)
 1. [Installing and configuring Kubernetes Ingress](docs/kubernetes-ingress.md)
 1. [Install and configure cert-manager](docs/cert-manager.md)

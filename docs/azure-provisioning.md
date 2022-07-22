@@ -2,6 +2,8 @@
 
 Three services need to be provisioned for this deployment strategy: AKS, Postgres, and Redis. You'll also need to create a Resource Group for these services to be organized within.
 
+Note, these services are installed during the bootstrap process. This documentation can be useful for fully understanding the relationships, networking and service creation.
+
 ## Resource Group creation
 
 Follow the instructions at https://docs.microsoft.com/en-us/azure/aks/kubernetes-walkthrough#create-a-resource-group
@@ -140,22 +142,19 @@ Create a few variables used throughout this section:
     export POSTGRES_PASSWORD="$(cat /dev/urandom | LC_ALL=C tr -dc 'a-zA-Z0-9' | fold -w 64 | head -n 1)"
     export PRIVATE_PG_FQDN="${PG_NAME}.private$(az cloud show | jq -r '.suffixes.postgresqlServerEndpoint')"
 
-    # Load functions for setting config
-    source deploy_lib.sh
-
     export HOUSTON_DATABASE="houston"
     export HOUSTON_USER="houston"
     export HOUSTON_PASSWORD="$(cat /dev/urandom | LC_ALL=C tr -dc 'a-zA-Z0-9' | fold -w 64 | head -n 1)"
-    set_codex_setting 'houston_db_name'     $HOUSTON_DATABASE
-    set_codex_setting 'houston_db_username' $HOUSTON_USER
-    set_codex_secret  'houston_db_password' $HOUSTON_PASSWORD
+    # save these settings for later 'houston_db_name'     $HOUSTON_DATABASE
+    # save these settings for later 'houston_db_username' $HOUSTON_USER
+    # save these settings for later 'houston_db_password' $HOUSTON_PASSWORD
 
     export EDM_DATABASE="edm"
     export EDM_USER="edm"
     export EDM_PASSWORD="$(cat /dev/urandom | LC_ALL=C tr -dc 'a-zA-Z0-9' | fold -w 64 | head -n 1)"
-    set_codex_setting 'edm_db_name'     $EDM_DATABASE
-    set_codex_setting 'edm_db_username' $EDM_USER
-    set_codex_secret  'edm_db_password' $EDM_PASSWORD
+    # save these settings for later 'edm_db_name'     $EDM_DATABASE
+    # save these settings for later 'edm_db_username' $EDM_USER
+    # save these settings for later 'edm_db_password' $EDM_PASSWORD
 
 Create the private DNS zone for the Postgres service domain name.
 
@@ -195,12 +194,11 @@ Update the configuration setting `db_host` value in `codex-configmap.yaml` using
             --query "fullyQualifiedDomainName" \
             --output tsv \
         )
-    source deploy_lib.sh
-    set_codex_setting 'db_fqdn'           $PG_FQDN
-    set_codex_setting 'db_host'           $PG_NAME
-    set_codex_setting 'db_admin_user'     $POSTGRES_USER
-    set_codex_secret  'db_admin_password' $POSTGRES_PASSWORD
-    set_codex_secret  'db_admin_conn_str' "$(az postgres flexible-server show-connection-string --server $PG_NAME --database-name postgres --admin-user $POSTGRES_USER --admin-password $POSTGRES_PASSWORD --query 'connectionStrings.psql_cmd' --output tsv)"
+    # save these settings for later 'db_fqdn'           $PG_FQDN
+    # save these settings for later 'db_host'           $PG_NAME
+    # save these settings for later 'db_admin_user'     $POSTGRES_USER
+    # save these settings for later 'db_admin_password' $POSTGRES_PASSWORD
+    # save these settings for later 'db_admin_conn_str' "$(az postgres flexible-server show-connection-string --server $PG_NAME --database-name postgres --admin-user $POSTGRES_USER --admin-password $POSTGRES_PASSWORD --query 'connectionStrings.psql_cmd' --output tsv)"
 
 And if you are installing ACM as part of this deployment:
 
@@ -433,11 +431,3 @@ Test the connection, because it's a complicated procedure:
 You should see something liket the following in the output:
 
     <STORAGE_NAME>.file.core.windows.net (10.1.2.X:445) open
-
-Connect this storage for use in AKS by creating a custom Storage Class. Deployments will use this to make Peristent Volume Claims.
-
-Create the Storage Class within the cluster:
-
-    envsubst < azurefile-csi-retained-storageclass.yaml.tmplt | kubectl apply -f -
-
-All we need to do from this point forward is make the Persistent Volume Claim when deploying.

@@ -1,8 +1,15 @@
-### Install cert-manager
+# Install cert-manager
+
+[cert-manager](https://cert-manager.io/) is installed as part of the bootstrapping process. There is no need to install cert-manager manually.
+
+The following instructions illustrate how to manually install cert-manager into an existing cluster. This can be useful in understanding the moving parts of cert-manager without diving too deeply into the application itself.
+
+
+## Installation
 
 See also https://cert-manager.io/docs/installation/helm/
 
-1. Install cert-manager's CRDs.
+1. Install cert-manager's CRDs using Helm
 
         helm repo add jetstack https://charts.jetstack.io
         helm repo update
@@ -32,7 +39,7 @@ See also https://cert-manager.io/docs/installation/helm/
         cert-manager-webhook-8888888888-88888      1/1     Running   0          1m
 
 
-### Create a ClusterIssuer Resource
+## Create a ClusterIssuer Resource
 
 Now that cert-manager is installed and running on your cluster, you will need to create a ClusterIssuer resource which defines which CA can create signed certificates when a certificate request is received. A ClusterIssuer is not a namespaced resource, so it can be used by more than one namespace.
 
@@ -62,12 +69,8 @@ Now that cert-manager is installed and running on your cluster, you will need to
     - The value of `privateKeySecretRef.name` provides the name of a secret containing the private key for this user's ACME server account (this is tied to the email address you provide in the manifest file). The ACME server will use this key to identify you.
     - To ensure that you own the domain for which you will create a certificate, the ACME server will issue a challenge to a client. cert-manager provides two options for solving challenges, [`http01`](https://cert-manager.io/docs/configuration/acme/http01/) and [`DNS01`](https://cert-manager.io/docs/configuration/acme/dns01/). In this example, the `http01` challenge solver will be used and it is configured in the `solvers` array. cert-manager will spin up *challenge solver* Pods to solve the issued challenges and use Ingress resources to route the challenge to the appropriate Pod.
 
-1. Create the ClusterIssuer resource:
 
-        kubectl create -f certificate-management/acme-issuer-prod.yaml
-        kubectl create -f certificate-management/acme-issuer-staging.yaml
-
-### Create a Certificate Resource
+## Create a Certificate Resource
 
 After you have a ClusterIssuer resource, you can create a Certificate resource. This will describe your [x509 public key certificate](https://en.wikipedia.org/wiki/X.509) and will be used to automatically generate a [CertificateRequest](https://cert-manager.io/docs/concepts/certificaterequest/) which will be sent to your ClusterIssuer.
 
