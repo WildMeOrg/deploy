@@ -75,7 +75,7 @@ function confirm_configuration() {
   read -p "Do all this look correct? [Y/n] " reply
   case $reply in
     n|N)
-      echo "Please correct the configuration and run again"    
+      echo "Please correct the configuration and run again"
       exit 1
     ;;
     y|Y|'')
@@ -113,7 +113,7 @@ function main() {
   local gitlab_namespace=$gitlab_namespace
   local acm_url=$acm_url
   local sentry_dsn=$sentry_dsn
-  
+
   local namespace=$name
   local edm_disk_size=$edm_disk_size
   local houston_disk_size=$houston_disk_size
@@ -135,7 +135,7 @@ function main() {
   echo "Looking up cache connection information"
   local redis_fqdn=$(get_secret "redis-creds" "fqdn" "default")
   local redis_password=$(get_secret "redis-creds" "primary_key" "default")
-  
+
 
   echo "Create namespace $namespace in cluster $cluster_name"
   kubectl create namespace $namespace

@@ -42,7 +42,7 @@ data:
 
     # $DB_ADMIN_CONN_STR - globally defined
     # $1 - database name of the database to load data into
-    # $4 - database name of the database 
+    # $4 - database name of the database
 
     db_conn_str=${DB_ADMIN_CONN_STR/"/postgres?"/"/${1}?"}
     gunzip -c ${4} | psql "${db_conn_str}"

@@ -1,7 +1,7 @@
 #!/bin/bash
 # This script aids the user in connecting to the postgres database
 # as the admin user.
-# 
+#
 # The script is dependent on the artifact created during
 # the provisioning process.
 # That is, `./${resource_group}.env` contains all the necessary information

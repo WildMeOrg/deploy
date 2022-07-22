@@ -11,7 +11,7 @@ data:
     # $1 - database name of the database to create
     # $2 - username of the database to create
     # $3 - password of the database to create
-    
+
     psql -v ON_ERROR_STOP=1 "$DB_ADMIN_CONN_STR" <<-EOSQL
         CREATE USER ${2} WITH PASSWORD '${3}';
         CREATE DATABASE ${1};

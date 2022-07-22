@@ -111,7 +111,7 @@ function copy_ssh_file() {
 function push_sql_dump_file() {
   local src=$1
   local dst=$2
-  
+
   az storage file upload \
     --account-name $storage_name \
     --account-key $storage_key \
