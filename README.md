@@ -74,6 +74,12 @@ The easiest way to establish a connection to the Postgres database is using the 
 - [Azure – Move resource group to a different subscription using azure-cli](https://iamroot.it/2021/08/01/azure-move-resource-group-to-a-different-subscription-using-azure-cli/) - Possibly useful for moving an entire resource group from our development subscription to the production subscription.
 
 
+## File Structure
+
+- `docs/*.md` - Concept specific documentation
+- `*.yaml` - Codex kubernetes object configuration
+- `*.sh` - Scripts used to facilitate creation and maintanence actions
+- `*.env` - Settings for a cluster deployed into the named resource group
 
 ## License
 
